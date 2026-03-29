@@ -1,0 +1,62 @@
+1. GeneralModifiable4
+Classic full initial data
+N = 100
+n = 3
+R2 = 0.5
+P = 1.0
+
+2. GeneralModifiable4
+Classic full initial data
+N = 200
+n = 3
+R2 = 0.5
+P = 1.0
+
+3. GeneralModifiable4
+Classic full initial data
+N = 200
+n = 3
+R2 = 0.5
+P = 10.0
+
+4. CovarianceMaximizer
+Classic full initial data
+N = 100
+n = 3
+R2 = 0.5
+P = 1.0
+
+5. CovarianceMaximizer
+Classic full initial data
+N = 100
+n = 3
+R2 = 0.5
+P = 10.0
+
+6. GeneralModifiable4
+Classic full initial data
+N = 1000
+n = 3
+R2 = 0.1
+P = 1000.0
+
+7. GeneralModifiable4
+Classic full initial data
+N = 1000
+n = 3
+R2 = 0.01
+P = 1000.0
+
+8. GeneralModifiable4
+Classic full initial data
+N = 1000
+n = 3
+R2 = 0.001
+P = 1000.0
+
+9. GeneralModifiable4
+Classic full initial data
+N = 1000
+n = 3
+R2 = 0.01
+P = 100.0

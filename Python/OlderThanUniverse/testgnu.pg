@@ -1,0 +1,3 @@
+set terminal postscript
+set output "sin.ps"
+set title "My First Plot"; plot sin(x)

@@ -1,0 +1,284 @@
+from sympy import *
+init_printing()
+
+# The idea behind this module is the following:
+# Simply, we represent all series as finite lists of Sympy terms.
+# We implement the basic series operations by hand.
+
+
+# ====================  HELPERS AND SERIES  =========================
+
+def print_var(st, s):
+	pprint("\n" + st + " = \n")
+	pprint(s)
+
+def bits(n):
+	res = []
+	while n:
+		b = n & (~n+1)
+		res.append(b)
+		n ^= b
+	return res
+
+def simpler(terms):
+	return [simplify(term) for term in terms]
+
+# returns the series of exponential function
+def exp_series(order):
+	result = [Integer(0) for k in range(order + 1)]
+	result[0] = Integer(1)
+
+	denom = 1
+	for k in range(1, order + 1):
+		denom *= k
+		result[k] = Rational(1, denom)
+	return result
+
+# returns the series of exp(c * x**2)
+def exp2_series(c, order):
+	result = [Integer(0) for k in range(order + 1)]
+	result[0] = Integer(1)
+
+	denom = 1
+	for k in range(2, order + 1, 2):
+		denom *= (k//2)
+		result[k] = Rational(1, denom) * c**(k//2)
+	return result
+
+def one_series(order):
+	result = [Integer(1)]
+	for k in range(1, order + 1):
+		result.append(Integer(0))
+	return result
+
+def zero_series(order):
+	return [Integer(0) for k in range(order + 1)]
+
+
+# ====================  SIMPLIFICATION  =========================
+
+def power(terms, pow, order_of_term, order_of_result):
+	result = [Integer(0) for k in range(order_of_result + 1)]
+	
+	if pow == 0:
+		result[0] = Integer(1)
+		return result
+	elif pow * order_of_term > order_of_result:
+		return result
+
+	indices = [order_of_term for i in range(pow)]
+	sum = order_of_term * pow
+
+	factorial = 1
+	for i in range(1, pow + 1):
+		factorial *= i
+
+	while True:
+		factor = factorial
+		last_index_equal = 0
+		for i in range(1, pow):
+			if indices[i] == indices[last_index_equal]:
+				factor //= (i - last_index_equal + 1)
+			elif indices[i] > indices[last_index_equal]:
+				last_index_equal = i
+			else:
+				factor = 0
+				break
+
+		if factor != 0:
+			new_summand = terms[indices[0]]
+			for i in range(1, pow):
+				new_summand *= terms[indices[i]]
+			result[sum] += Integer(factor) * new_summand
+
+		# calculate next indices sequence
+		stop = True
+		for i in range(pow):
+			indices[i] += 1
+			sum += 1
+			if sum > order_of_result:
+				sum -= indices[i] - order_of_term
+				indices[i] = order_of_term
+			else:
+				stop = False
+				break
+
+		if stop:
+			break
+	
+	return result
+
+
+def power_series(terms1, terms2, order_of_term, order_of_result):
+	result = [Integer(0) for k in range(order_of_result + 1)]
+	expand_to = order_of_result // order_of_term
+	for i in range(0, expand_to + 1):
+		if terms1[i] == Integer(0):
+			continue
+
+		result_partial = power(terms2, i, order_of_term, order_of_result)
+		for j in range(i*order_of_term, order_of_result + 1):
+			result[j] += result_partial[j] * terms1[i]
+	return result
+
+
+# calculate e^(terms)
+# we assume that order_of_term >= 1
+def exponentiate(terms, order_of_term, order_of_result):
+	return power_series(exp_series(order_of_result), terms, order_of_term, order_of_result)
+
+
+# This function might be able to be sped up eventually:
+# - Firstly, by assuming that xn and yn are just 1, and then by removing the last row and column
+# - Secondly, by precalculating the exponentials, so as to not calculate them multiple times.
+# - (and perhaps by applying more row/column operations, e.g. by iterating determinant formulas)
+# Calculates the determinant of Aij = exp(xi * yj)
+# We assume that termsx[i] has order order_of_termsx[i], and that termsx[i] - termsx[j] has
+# order alpha[i][j]. Similarly for termsy.
+def determinant(termsx, order_of_termsx, termsy, order_of_termsy, alpha, beta, order_of_result):
+	N = len(termsx)
+	sum = 0
+	for i in range(N):
+		for j in range(i + 1, N):
+			sum += alpha[i][j]
+			sum += beta[i][j]
+	sum_alpha = [0 for i in range(N)]
+	sum_beta = [0 for j in range(N)]
+	for i in range(N):
+		for j in range(N):
+			if i != j:
+				sum_alpha[i] += alpha[i][j]
+				sum_beta[j] += beta[j][i]
+	
+	orders_of_exponentials = [[order_of_result - sum + sum_alpha[i] + sum_beta[j] for j in range(N)] for i in range(N)]
+
+	exponentials = [[[] for j in range(N)] for i in range(N)]
+	for i in range(N):
+		for j in range(N):
+			exponentials[i][j] = multiply(termsx[i], order_of_termsx[i], termsy[j], order_of_termsy[j], orders_of_exponentials[i][j])
+			exponentials[i][j] = exponentiate(exponentials[i][j], order_of_termsx[i] + order_of_termsy[j], orders_of_exponentials[i][j])
+			for k in range(orders_of_exponentials[i][j], order_of_result):
+				exponentials[i][j].append(Integer(0))
+	
+	DP = [zero_series(order_of_result) for s in range(2**N)]
+	DP_order = [0 for s in range(2**N)]
+
+	for s in range(1, 2**N):
+		logs2 = [b.bit_length() - 1 for b in bits(s)]
+		sub_DP = [s - b for b in bits(s)]
+		if len(sub_DP) == 1:
+			DP_order[s] = 0
+			DP[s] = exponentials[-1][logs2[0]]
+			continue
+		
+		DP_order[s] = DP_order[sub_DP[0]]
+		for i in range(1, len(sub_DP)):
+			DP_order[s] += alpha[-len(sub_DP)][-i]
+			DP_order[s] += beta[logs2[0]][logs2[i]]
+
+		for i in range(len(sub_DP)):
+			new_term = multiply(exponentials[-len(sub_DP)][logs2[i]], 0, DP[sub_DP[i]], DP_order[sub_DP[i]], order_of_result)
+			new_term = scalar_multiply(new_term, Integer((-1)**i))
+			DP[s] = add(DP[s], new_term, order_of_result)
+
+	return DP[2**N - 1]
+
+
+def det(terms, order_of_terms, order_of_result):
+	N = len(terms)
+	alpha = [[min(order_of_terms[i], order_of_terms[j]) for j in range(N)] for i in range(N)]
+	beta = [[min(order_of_terms[i], order_of_terms[j]) for j in range(N)] for i in range(N)]
+	return determinant(terms, order_of_terms, terms, order_of_terms, alpha, beta, order_of_result)
+
+
+# Divides terms1 by terms2.
+def divide(terms1, order1, terms2, order2, order_of_result):
+	if order1 < order2:
+		raise Exception("we divided and expression by another expression of higher order.")
+	
+	result = [Integer(0) for k in range(order_of_result + 1)]
+
+	for k in range(order1 - order2, order_of_result + 1):
+		result[k] = terms1[k + order2]
+		for i in range(k + order2 - order1):
+			result[k] -= result[i + order1 - order2] * terms2[2*order2 - order1 + k - i]
+		result[k] /= terms2[order2]
+		result[k] = cancel(result[k])
+
+	return result
+
+
+# calculate e^(c * (terms)**2)
+# we assume that order_of_term >= 1
+def exponentiate_squared(terms, c, order_of_term, order_of_result):
+	return power_series(exp2_series(c, order_of_result), terms, order_of_term, order_of_result)
+
+
+def multiply(terms1, order_of_term1, terms2, order_of_term2, order_of_result):
+	result = [Integer(0) for k in range(order_of_result + 1)]
+
+	for s in range(order_of_term1 + order_of_term2, order_of_result + 1):
+		for i in range(order_of_term1, s + 1 - order_of_term2):
+			result[s] += terms1[i] * terms2[s - i]
+	return result
+
+
+def scalar_multiply(terms, c):
+	return [c * term for term in terms]
+
+
+def add(terms1, terms2, order_of_result):
+	return [terms1[k] + terms2[k] for k in range(order_of_result + 1)]
+
+
+def subtract(terms1, terms2, order_of_result):
+	return [terms1[k] - terms2[k] for k in range(order_of_result + 1)]
+
+
+# we assume that terms[0] = 1
+def inverse(terms, order_of_result):
+	result = [Integer(0) for k in range(order_of_result + 1)]
+	result[0] = Integer(1)
+	for s in range(order_of_result + 1):
+		for i in range(s):
+			result[s] -= terms[s - i] * result[i]
+	return result
+
+
+# we assume that terms[0] = 1
+def sqrt(terms, order_of_result):
+	result = [Integer(0) for k in range(order_of_result + 1)]
+	result[0] = Integer(1)
+	if order_of_result > 0:
+		result[1] = Rational(1, 2) * terms[1]
+	for s in range(2, order_of_result + 1):
+		result[s] = terms[s]
+		for i in range(1, s):
+			result[s] -= result[s - i] * result[i]
+		result[s] *= Rational(1, 2)
+	return result
+
+
+# =============================================
+
+# n = 5
+# a2, a3, a4 = symbols('a2 a3 a4')
+# x = symbols('x')
+
+# f = 1 + a2 * x + a3 * x**2 + a4 * x**3
+
+# pprint(limit(diff((1/f)**n, x, n-1), x, 0) / factorial(n))
+
+a1, a2, a3 = symbols('a1 a2 a3')
+e = symbols('e')
+terms1 = [-a1, -a2 * e, -a3 * e**2 / 2]
+terms2 = [-a1, -a2, -a3 / 2]
+# terms3 = [Integer(1), a1 * (1 + e), a2 * (1 + e)**2 / 2, a3 * (1 + e)**3 / 6]
+terms3 = [Integer(1), a1, a2 / 2, a3 / 6]
+
+res = divide(terms1, 0, terms2, 0, 2)
+res = multiply(res, 0, terms3, 0, 2)
+
+
+pprint(res[0])
+pprint(res[1])

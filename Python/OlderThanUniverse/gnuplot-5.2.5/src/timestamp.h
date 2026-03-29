@@ -1,0 +1,4 @@
+#ifndef GNUPLOT_TIMEBASE_H_INCLUDED
+#define GNUPLOT_TIMEBASE_H_INCLUDED
+const char gnuplot_date[] = "2018-09-26 ";
+#endif /* GNUPLOT_TIMEBASE_H_INCLUDED */
