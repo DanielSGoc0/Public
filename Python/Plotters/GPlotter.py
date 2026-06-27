@@ -6,13 +6,14 @@ import math
 from matplotlib import cm
 import scipy
 
-K = 5
-R2_MAX = 2.0
+K = 1
+R2_MAX = 3.0
+A_MAX = 20.0
 
-R2_AMT = 30
-A_AMT = 100
+R2_AMT = 500
+A_AMT = 500
 R2 = [[(i * 1.0) / R2_AMT * R2_MAX for j in range(A_AMT + 1)] for i in range(R2_AMT + 1)]
-A = [[(j * 1.0) / A_AMT for j in range(A_AMT + 1)] for i in range(R2_AMT + 1)]
+A = [[(j * 1.0) / A_AMT * A_MAX for j in range(A_AMT + 1)] for i in range(R2_AMT + 1)]
 
 X_AMT = 200
 Y_AMT = 100
@@ -173,20 +174,28 @@ if K >= 2:
 
 				G[k][i][j] = supremum
 
-				r2 = R2[i][j] - supremum_at
-				rho2 = np.exp(-supremum_at)
-				# G_x[k][i][j] = r2 / (1.0 - np.exp(-R2[i][j]))
+				# r2 = R2[i][j] - supremum_at
+				# rho2 = np.exp(-supremum_at)
+				# # G_x[k][i][j] = r2 / (1.0 - np.exp(-R2[i][j]))
 
-				a2 = rho2 * np.exp(-r2)
-				w2 = np.real(-scipy.special.lambertw(-np.exp(-r2 - a2), 0) - a2)
-				if math.isnan(w2):
-					G_x[k][i][j] = 0.0
-				else:
-					G_x[k][i][j] = w2/r2
+				# a2 = rho2 * np.exp(-r2)
+				# w2 = np.real(-scipy.special.lambertw(-np.exp(-r2 - a2), 0) - a2)
+				# if math.isnan(w2):
+				# 	G_x[k][i][j] = 0.0
+				# else:
+				# 	G_x[k][i][j] = w2/r2
 				# if r2 + rho2 * np.exp(-r2) <= 1.0:
 				# 	G_x[k][i][j] = r2
 				# 	# G_y[k][i][j] = rho2
 				# 	G_y[k][i][j] = 1.0
+
+def true_G(R2, A):
+	if R2 + (1.0 - A) * np.exp(-R2) <= 1.0:
+		return np.sqrt(R2 * (1.0 - np.exp(-R2) * (1.0 - A)))
+	else:
+		b2 = R2 - 1.0 - np.real(scipy.special.lambertw(-(1.0 - A) / math.e))
+		return 2.0 - np.exp(-b2 / 2.0) * (2.0 - (R2 - b2))
+
 
 # ========================================================================================================================
 
@@ -218,6 +227,26 @@ for i in range(1, R2_AMT + 1):
 		# # Z[i][j] = approx_Gx(r2, 1.0 - rho2, K)
 		# # Z[i][j] = best_G(r2, rho2)
 
+		# r2 = R2[i][j]
+		# rho2 = 1.0 - A[i][j]
+		# h2 = r2 / (1.0 - rho2 * np.exp(-r2))
+
+		# a2 = 0.0
+		# if h2 > 1.0:
+		# 	a2 = h2 + np.real(scipy.special.lambertw(-np.exp(-h2) * h2))
+
+		# res = np.sqrt(r2 * (1.0 - rho2 * np.exp(-r2)))
+		# res -= np.sqrt(a2 * (1 - np.exp(-a2)))
+		# res += 2.0 * (1.0 - np.exp(-a2 / 2.0))
+		# res -= G[K][i][j]
+		# Z[i][j] = res
+		# # print(h2, a2, res)
+
+		# r2 = R2[i][j]
+		# rho2 = 1.0 - A[i][j]
+		# Z[i][j] = approx_G(r2, 1.0 - rho2, K) - approx_G(r2 - 0.01, 1.0 - rho2 * np.exp(-0.01), K)
+		Z[i][j] = true_G(R2[i][j], A[i][j])
+
 
 
 		# S2 = np.exp(1.0) * (A[i][j] + 1.0)
@@ -230,10 +259,10 @@ for i in range(1, R2_AMT + 1):
 		# 	Z[i][j] = 0.0
 		# 	continue
 
-		r2 = R2[i][j]
-		rho2 = A[i][j]
+		# r2 = R2[i][j]
+		# rho2 = A[i][j]
 		# Z[i][j] = best_G(r2, rho2)
-		Z[i][j] = best_G(r2, rho2) - approx_G(r2, 1.0 - rho2, K)
+		# Z[i][j] = best_G(r2, rho2) - approx_G(r2, 1.0 - rho2, K)
 		# h2 = r2 / (1.0 - rho2 * np.exp(-r2))
 
 		# if h2 < 1.0:
@@ -287,7 +316,7 @@ for i in range(1, R2_AMT + 1):
 # 		else:
 # 			Z2[i][j] = np.log((Z[i][j - 1] + Z[i][j + 1] - 2.0 * Z[i][j]) * A_AMT**2)
 
-surf = ax.plot_surface(R2, A, Z, cmap=cm.coolwarm, linewidth=0, antialiased=False)
+surf = ax.plot_surface(R2, A, Z, cmap=cm.coolwarm, linewidth=0)
 # surf = ax.plot_surface(R2, A, Z2, cmap=cm.coolwarm, linewidth=0, antialiased=False)
 # surf = ax.plot_surface(X, Y, Z, cmap=cm.coolwarm, linewidth=0, antialiased=False)
 

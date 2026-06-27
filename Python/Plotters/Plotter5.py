@@ -1,5 +1,5 @@
 # This version of plotter has variable sliders and better zoom!
-# Just another plotter
+# So basically we just condition Gaussian and plot condition covariance wrt fixed point.
 
 from tkinter import *
 import tkinter
@@ -28,31 +28,46 @@ POINTS = []
 
 # ===========================================================================================
 
-def f(x, k2, r):
-	x += 0.005
-	# x = np.abs(x)
-	# return ((x - y) * np.log(x/y) + (y - z) * np.log(y/z)) / ((z - x) * np.log(z/x))
-	# return 1.0 - (abs(x*y - 1.0/(x*y)) + 1) / ((abs(x - 1.0/x) + 1) * (abs(y - 1.0/y) + 1))
-	return np.exp(-(x - r)**2 / 2.0) - np.exp(-(x*x + r*r) / 2.0) * (1.0 - k2)
+# we take conditioned covariance of points n and n+1
+def calc(X, p):
+	n = len(p)
+
+	Sigma = np.zeros((n + 2, n + 2), dtype='double')
+	for i in range(n + 2):
+		for j in range(n + 2):
+			Sigma[i][j] = np.exp(-np.dot(X[i] - X[j], X[i] - X[j]) / 2.0)
+	for i in range(n):
+		Sigma[i][i] += 1.0 / p[i]
+	C = np.linalg.cholesky(Sigma)
+
+	return C[n + 1][n] * C[n][n]
+
 
 def new_plot():
-	global NODES, POINTS, scale_K2, scale_R
+	global NODES, POINTS, scale_x1, scale_p1, scale_x2, scale_p2
 	NODES.clear()
 	POINTS.clear()
 
-	k2 = scale_K2.get() / 100.0
-	r = scale_R.get() / 100.0
-
-	# MIN = 10.0
+	x1 = scale_x1.get() / 100.0
+	p1 = scale_p1.get() / 100.0
+	x2 = scale_x2.get() / 100.0
+	p2 = scale_p2.get() / 100.0
 
 	LINE = []
-	for X in range(-100, 101):
-		x = X/50.0
-		LINE.append((x, f(x, k2, r)))
-		# MIN = min(LINE[-1][1], MIN)
-	# print(MIN)
-	NODES.append(LINE)
+	LINE2 = []
+	LINE3 = []
+	for scale_x3 in range(-300, 301):
+		x = scale_x3 / 100.0
+		x += 0.005
+		X = np.array([[x1], [x2], [x], [0.0]], dtype='double')
+		p = np.array([p1, p2], dtype='double')
+		LINE.append((x, calc(X, p)))
+		LINE2.append((x, np.exp(-np.dot(X[2] - X[3], X[2] - X[3]) / 2.0)))
+		LINE3.append((x, -np.exp(-np.dot(X[2] - X[3], X[2] - X[3]) / 2.0)))
 
+	NODES.append(LINE)
+	NODES.append(LINE2)
+	NODES.append(LINE3)
 
 
 def Action1():
@@ -144,17 +159,21 @@ Label1 = Label(frame, textvariable=var1, relief=RAISED)
 var1.set("Zoom = " + str(Zoom))
 Label1.pack(side = LEFT)
 
-# scale_F = Scale(frame, from_=-100, to=250, orient=HORIZONTAL, command=slider)
-# scale_F.set(0)
-# scale_F.pack(side = LEFT)
+scale_x1 = Scale(frame, from_=-200, to=200, orient=HORIZONTAL, command=slider)
+scale_x1.set(0)
+scale_x1.pack(side = LEFT)
 
-scale_K2 = Scale(frame, from_=0, to=2000, orient=HORIZONTAL, command=slider)
-scale_K2.set(0)
-scale_K2.pack(side = LEFT)
+scale_p1 = Scale(frame, from_=1, to=500, orient=HORIZONTAL, command=slider)
+scale_p1.set(0)
+scale_p1.pack(side = LEFT)
 
-scale_R = Scale(frame, from_=-100, to=300, orient=HORIZONTAL, command=slider)
-scale_R.set(0)
-scale_R.pack(side = LEFT)
+scale_x2 = Scale(frame, from_=-200, to=200, orient=HORIZONTAL, command=slider)
+scale_x2.set(0)
+scale_x2.pack(side = LEFT)
+
+scale_p2 = Scale(frame, from_=1, to=500, orient=HORIZONTAL, command=slider)
+scale_p2.set(0)
+scale_p2.pack(side = LEFT)
 
 
 def key_handler(event):
