@@ -2,21 +2,21 @@
 # - It only supports fixed Gaussian covariance function
 # - The problem is characterized by fixed initial data set (matrix K and D), fixed r^2 and fixed precisions per step. 
 # - The minimization procedure is a simple BFGS method.
-# It extends 6th version.
+# It extends 6th version - this time we fix XN and weights w.
 
 import os
 import numpy as np
 import scipy.linalg
 from scipy.stats import ortho_group
 from pathlib import Path
-import matplotlib.pyplot as plt
 
-np.set_printoptions(suppress=True, formatter={'float_kind':'{:5.9f}\t'.format}, linewidth=200000, threshold=np.inf)
+np.set_printoptions(suppress=True, formatter={'float_kind':'{:5.8f}\t'.format}, linewidth=200000, threshold=np.inf)
 
 n = None
-r2 = None
 l = None
 p = None
+w = None
+XN = None
 modifiableX = None
 K = None
 D = None
@@ -26,7 +26,7 @@ INF = 1e13
 
 def get_v(args):
 	global n, l, modifiableX
-	(X, R, P) = args
+	(X, P) = args
 
 	v = []
 	for i in range(l[n]):
@@ -34,8 +34,6 @@ def get_v(args):
 			if modifiableX[i][j]:
 				v.append(X[i][j])
 
-	for r in R:
-		v.append(r)
 	for p in P:
 		v.append(p)
 
@@ -55,41 +53,25 @@ def get_args(v):
 			else:
 				X[i][j] = 0.0
 
-	R = np.zeros((n + 1), dtype='double')
-	for j in range(n + 1):
-		R[j] = v[index]
-		index += 1
-
 	P = np.zeros((l[n]), dtype='double')
 	for i in range(l[n]):
 		P[i] = v[index]
 		index += 1
 
-	return [X, R, P]
+	return [X, P]
 
 
 def reconstruct(args):
-	global n, r2, l, p, modifiableX, K, D, INF
+	global n, l, p, XN, modifiableX, K, D, INF
 	X = args[0]
-	R = args[1]
-	P = args[2]
+	P = args[1]
 
-	# Rescale and obtain X_out and precisions p.
-	s = 0.0
-	max_R = np.max(R)
-
+	# Set X[l[n]] to be XN
 	for j in range(n + 1):
-		if max_R - R[j] <= 30:
-			s += np.exp(R[j] - max_R)
-	s = np.sqrt(r2 / s)
-
-	for j in range(n + 1):
-		if max_R - R[j] <= 30:
-			X[l[n]][j] = s * np.exp((R[j] - max_R) / 2.0)
-		else:
-			X[l[n]][j] = 0.0
+		X[l[n]][j] = XN[j]
 
 
+	# Rescale and obtain precisions p.
 	sigma2 = np.zeros((l[n]), dtype='double')
 	if hasattr(p, "__len__"):
 		for k in range(n):
@@ -128,7 +110,7 @@ def reconstruct(args):
 # ===============================================================================
 
 def calc(X, sigma2, PRINTING):
-	global n, r2, l, p, modifiableX, K, D
+	global n, l, p, w, modifiableX, K, D
 
 	# Calculate matrix K and ANS
 	K_ = np.zeros((l[n] + 1, l[n] + 1), dtype='double')
@@ -145,22 +127,13 @@ def calc(X, sigma2, PRINTING):
 
 	ANS = 0.0
 	for k in range(n):
-		ANS += X[l[n]][k + 1] * np.sqrt(np.dot(C[l[n], l[k]:l[k + 1]], C[l[n], l[k]:l[k + 1]]))
+		ANS += w[k + 1] * np.dot(C[l[n], :l[k + 1]], C[l[n], :l[k + 1]])
 	if PRINTING >= 1:
 		print("ANS:")
 		print(ANS)
  
 
 	# ======   Additional variables   ======
-
-	w = np.zeros((n + 1), dtype='double')
-	for k in range(1, n + 1):
-		w[k] = X[l[n]][k] / np.sqrt(np.dot(C[l[n], l[k - 1]:l[k]], C[l[n], l[k - 1]:l[k]]))
-		if k < n:
-			w[k] -= X[l[n]][k + 1] / np.sqrt(np.dot(C[l[n], l[k]:l[k + 1]], C[l[n], l[k]:l[k + 1]]))
-	if PRINTING >= 2:
-		print("w:")
-		print(w)
 
 	A = np.zeros((n + 1, l[n]), dtype='double') # A[k][i] non-zero if i < l[k], and has an additional factor of p[i]
 	Cinv = scipy.linalg.solve_triangular(C[:l[n], :l[n]], np.eye(l[n]), lower=True)
@@ -178,8 +151,8 @@ def calc(X, sigma2, PRINTING):
 
 
 	if PRINTING >= 4:
-		print("r2:\t", r2)
 		print("K:\t", K[l[n]][l[n]])
+		print("r2:\t", np.dot(X[l[n]], X[l[n]]))
 		print("X / XN:")
 		I = []
 		for i in range(l[n]):
@@ -187,54 +160,27 @@ def calc(X, sigma2, PRINTING):
 				I.append(i)
 		print(np.linalg.solve(np.multiply(M[np.ix_(I, I)], Sigma[np.ix_(I, I)]), u[I]))
 
-	if PRINTING >= 5:
-		x = np.zeros((n + 1), dtype='double')
-		y = np.zeros((n + 1), dtype='double')
-		for k in range(n):
-			x[k] = np.dot(X[l[n]][(k+1):], X[l[n]][(k+1):])
-			y[k] = np.dot(C[l[n]][l[k]:], C[l[n]][l[k]:])
-
-		plt.plot(x, y)
-		plt.scatter(x, y)
-		plt.xlabel("XN leftover")
-		plt.ylabel("CN leftover")
-		plt.title("Scatter plot of points")
-		plt.show()
-
 	# ======   Calculating gradient   ======
 
 	gradient = []
 	for i in range(l[n]):
 		for j in range(n + 1):
 			if modifiableX[i][j]:
-				gradient.append(-M_Sigma_X[i][j] + u[i] * X[l[n]][j])
-
-
-	r2_gradient = np.zeros((n + 1), dtype='double')
-	for j in range(n + 1):
-		if j > 0:
-			r2_gradient[j] = np.sqrt(np.dot(C[l[n], l[j - 1]:l[j]], C[l[n], l[j - 1]:l[j]]))
-		r2_gradient[j] += np.dot(u, X[:l[n], j])
-
-	for j0 in range(n + 1):
-		partial = 1.0/2.0 * r2_gradient[j0] * X[l[n]][j0]
-		for j1 in range(n + 1):
-			partial -= 1.0/2.0 * r2_gradient[j1] * X[l[n]][j0]**2 * X[l[n]][j1] / r2
-		gradient.append(partial)
+				gradient.append(-2.0 * M_Sigma_X[i][j] + 2.0 * u[i] * X[l[n]][j])
 
 
 	if hasattr(p, "__len__"):
 		for k in range(n):
 			for i0 in range(l[k], l[k + 1]):
-				partial = M[i0][i0] * sigma2[i0] / 2.0
+				partial = M[i0][i0] * sigma2[i0]
 				for i1 in range(l[k], l[k + 1]):
-					partial -= M[i1][i1] * sigma2[i1] / (2.0 * p[k] * sigma2[i0])
+					partial -= M[i1][i1] * sigma2[i1] / (p[k] * sigma2[i0])
 				gradient.append(partial)
 	else:
 		for i0 in range(l[n]):
-			partial = M[i0][i0] * sigma2[i0] / 2.0
+			partial = M[i0][i0] * sigma2[i0]
 			for i1 in range(l[n]):
-				partial -= M[i1][i1] * sigma2[i1] / (2.0 * p * sigma2[i0])
+				partial -= M[i1][i1] * sigma2[i1] / (p * sigma2[i0])
 			gradient.append(partial)
 
 
@@ -302,66 +248,6 @@ def read_from_file(filename):
 	return RES
 
 
-
-# ===============================================================================
-
-def aggregate_input(X, sigma2, eps_d2=1e-6, eps_p=1e-9, big_d2=100.0):
-	global n, l, D
-
-	new_l = [0]
-	new_p = []
-	new_rows = []
-
-	# Process each interval [l[k], l[k+1])
-	for k in range(n):
-		indices = []
-		for i in range(l[k], l[k + 1]):
-			if sigma2[i] * eps_p > 1.0:
-				continue
-			if np.dot(X[i] - X[l[n]], X[i] - X[l[n]]) + D[i][l[n]] > big_d2:
-				continue
-			indices.append(i)
-
-		# Build clusters by single-linkage: rows connected by eps_dist edges.
-		unused = set(indices)
-
-		while unused:
-			root = unused.pop()
-			cluster = [root]
-			stack = [root]
-
-			while stack:
-				i = stack.pop()
-				close = []
-
-				for j in unused:
-					if np.dot(X[i] - X[j], X[i] - X[j]) <= eps_d2:
-						close.append(j)
-
-				for j in close:
-					unused.remove(j)
-					stack.append(j)
-					cluster.append(j)
-
-			weights = 1.0 / sigma2[cluster]
-			rows = X[cluster]
-
-			total_p = weights.sum()
-			avg_row = np.average(rows, axis=0, weights=weights)
-
-			new_p.append(total_p)
-			new_rows.append(avg_row)
-
-		new_l.append(len(new_p))
-
-	# Append the final extra row X[l[-1]]
-	new_X = np.vstack([new_rows, X[l[n]]]) if new_rows else X[[l[n]]]
-	new_p = np.asarray(new_p)
-
-	return new_l, new_p, new_X
-
-
-
 # ===============================================================================
 
 
@@ -384,135 +270,24 @@ def get_next_seed(increase):
 	return seed
 
 
-def generate_random(seed):
-	global n, r2, l, p, modifiableX, K, D
-	np.random.seed(seed) # seed can be None
-
-	l = [0, 2, 4, 6]
-	# l = [0, 2, 4, 6]
-	# p = [1.0]
-	# n = 2
-	# r2 = 1.0
-	# l = [0, 1, 2]
-	# p = [1.0, 1.0]
-	# n = 3
-	# r2 = 1.0
-	# l = [0, 2, 4, 6]
-	# p = [1.0, 1.0, 1.0]
-
-	n = len(l) - 1
-	# r2 = 0.1
-	r2 = np.random.random()
-	r2 = r2 / (1.0 - r2)
-	# c = np.random.random()
-	# c = c / (1.0 - c)
-	# p = []
-	# for k in range(n):
-	# 	v = np.random.random()
-	# 	v = v / (1.0 - v)
-	# 	p.append(v * c)
-	# 	# p.append(1000000.0)
-	# p = np.random.random()
-	# p = p / (1.0 - p)
-	# p *= 100.0
-
-	p = 10.0
-
-	modifiableX = [[False for j in range(l[n] + 1)] for i in range(l[n] + 1)]
-	for j in range(n + 1):
-		for i in range(l[j], l[n]):
-			modifiableX[i][j] = True
-
-	D = np.zeros((l[n] + 1, l[n] + 1), dtype='double')
-	K = np.zeros((l[n] + 1, l[n] + 1), dtype='double')
-
-	s = n+1
-
-	d = 2
-	X0 = np.random.normal(0.0, 1.0, (s, d))
-	D0 = np.zeros((s, s), dtype='double')
-	for i0 in range(s):
-		for i1 in range(s):
-			D0[i0][i1] = np.dot(X0[i0] - X0[i1], X0[i0] - X0[i1])
-			# D[i0][i1] = 0.0
-
-	# K0 = np.ones((s, s), dtype='double')
-	# c = np.random.random()
-	# c = c / (1.0 - c)
-	# K0 *= (1.0 + c) * 0.1
-	# K0 *= 0.0
-
-	# K0 = np.diag(np.random.random((s)))
-	# for i in range(s):
-	# 	K0[i][i] = K0[i][i] / (1.0 - K0[i][i])
-	# if s > 1:
-	# 	U = ortho_group.rvs(dim = s)
-	# 	K0 = U @ K0 @ U.T
-	# K0[0][0] = np.random.random()
-	# K0[0][0] = 0.004943762
-
-	# for i0 in range(l[1]):
-	# 	for i1 in range(l[1]):
-	# 		K0[i0][i1] = K0[0][0]
-
-	# s = np.random.random()
-	# for i in range(l[1]):
-	# 	K0[i][0] *= s
-	# 	K0[0][i] *= s
-
-	# for i0 in range(l[n] + 1):
-	# 	for i1 in range(l[n] + 1):
-	# 		D[i0][i1] = D0[i0 % s][i1 % s]
-	# 		K[i0][i1] = K0[i0 % s][i1 % s]
-
-	# 		# i00 = i0 % (s - 1)
-	# 		# i11 = i1 % (s - 1)
-	# 		# if i0 == l[n]:
-	# 		# 	i00 = s - 1
-	# 		# else:
-	# 		# 	i00 = 0
-	# 		# if i1 == l[n]:
-	# 		# 	i11 = s - 1
-	# 		# else:
-	# 		# 	i11 = 0
-	# 		# D[i0][i1] = D0[i00][i11]
-	# 		# K[i0][i1] = K0[i00][i11]
-
-	l.append(l[n] + 1)
-	for k0 in range(n + 1):
-		for k1 in range(n + 1):
-			for i0 in range(l[k0], l[k0 + 1]):
-				for i1 in range(l[k1], l[k1 + 1]):
-					# K[i0][i1] = K0[k0][k1]
-					# D[i0][i1] = D0[k0][k1]
-					# K[i0][i1] = K0[i0 % 2][i1 % 2]
-					# D[i0][i1] = D0[i0 % 2][i1 % 2]
-					# K[i0][i1] = K0[0][0]
-					# D[i0][i1] = D0[0][0]
-
-					D[i0][i1] = D0[k0][k1]
-					K[i0][i1] = np.exp(-D[i0][i1] / 2.0)
-	l.pop()
-
-
-
-
-
 def generate_from_file():
-	global n, r2, l, p, modifiableX, K, D, INF
+	global n, l, p, w, XN, modifiableX, K, D, INF
 	info = read_from_file("in.txt")
 	
 	n = info[0]
-	r2 = info[1]
-	l = info[2]
-	p = info[3]
-	K = info[4]
-	D = info[5]
+	l = info[1]
+	p = info[2]
+	w = info[3]
+	XN = info[4]
+	K = info[5]
+	D = info[6]
+	# sum = 0.0
 	for k in range(n):
 		sum = 0.0
 		for i in range(l[k], l[k + 1]):
 			sum += p[i]
 		p[k] = sum
+	# p = sum
 
 	modifiableX = [[False for j in range(l[n] + 1)] for i in range(l[n] + 1)]
 	for j in range(n + 1):
@@ -521,7 +296,7 @@ def generate_from_file():
 
 
 def start_random(seed):
-	global n, r2, l, p, modifiableX, K, D
+	global n, l, p, modifiableX, K, D
 	np.random.seed(seed) # seed can be None
 
 	X_start = np.zeros((l[n] + 1, n + 1), dtype='double')
@@ -529,44 +304,24 @@ def start_random(seed):
 		for i in range(l[j], l[n]):
 			X_start[i][j] = np.random.normal(0.0, 1.0)
 
-	R_start = np.random.normal(0.0, 1.0, (n + 1))
 	P_start = np.random.normal(0.0, 1.0, (l[n]))
 
-	return (X_start, R_start, P_start)
-
-
-# def start_random(seed):
-# 	global n, r2, l, p, modifiableX, K, D
-# 	np.random.seed(seed) # seed can be None
-
-# 	X_start = np.zeros((l[n] + 1, n + 1), dtype='double')
-# 	for i in range(l[n]):
-# 		sign = 1.0
-# 		if i % 2 == 1:
-# 			sign = -1.0
-# 		k = i//2
-# 		for j in range(k + 1):
-# 			X_start[i][j] = sign / np.sqrt(k + 1)
-
-# 	R_start = np.zeros((n + 1))
-# 	P_start = np.zeros((l[n]))
-
-# 	return (X_start, R_start, P_start)
+	return (X_start, P_start)
 
 
 def save_to_file(ans, X, sigma2):
-	global n, r2, l, p, modifiableX, K, D
+	global n, l, p, w, XN, modifiableX, K, D
 
 	with open("out.txt", "a") as f:
 		f.write(str(n))
 		f.write("\n")
-		f.write(str(r2))
-		f.write("\n")
-		f.write(str(p))
-		f.write("\n")
 		f.write(str(l))
 		f.write("\n")
 		f.write(str(np.reciprocal(sigma2)))
+		f.write("\n")
+		f.write(str(w))
+		f.write("\n")
+		f.write(str(XN))
 		f.write("\n")
 		f.write(str(K))
 		f.write("\n")
@@ -583,8 +338,6 @@ def minimize_func(v):
 	return calc(X, sigma2, 0)
 
 def minimize(seed):
-	global n, r2, l, p, modifiableX, K, D
-
 	RES = scipy.optimize.minimize(minimize_func, get_v(start_random(seed)), jac=True, options={"gtol": 0.0000000000000000000001}, method='BFGS')
 	# RES = scipy.optimize.minimize(fun, get_v(start_random(seed)), jac=False, options={"gtol": 0.0000000000000000000001}, method='BFGS')
 
@@ -592,6 +345,73 @@ def minimize(seed):
 	# print(X_end)
 		
 	return (-RES.fun, X_end, sigma2_end)
+
+
+def generate_random(seed):
+	global n, l, p, w, XN, modifiableX, K, D
+	np.random.seed(seed) # seed can be None
+
+	# l = [0, 2, 4, 6]
+	l = [0, 2, 4]
+	n = len(l) - 1
+
+	w = np.random.random((n + 1))
+	# w[n] += 10.0
+	w[0] = 0.0 # Just a convention, it doesn't influence the score anyway.
+
+	XN = np.random.random((n + 1))
+	XN[n] = 0.0 # Just a convention, doesn't influence the optimal solution.
+	r2 = np.random.random()
+	r2 = r2 / (1.0 - r2)
+	XN *= np.sqrt(r2 / np.dot(XN, XN))
+	
+	# c = np.random.random()
+	# c = c / (1.0 - c)
+	# p = []
+	# for k in range(n):
+	# 	v = np.random.random()
+	# 	v = v / (1.0 - v)
+	# 	p.append(v * c)
+	p = np.random.random()
+	p = p / (1.0 - p)
+
+	modifiableX = [[False for j in range(l[n] + 1)] for i in range(l[n] + 1)]
+	for j in range(n + 1):
+		for i in range(l[j], l[n]):
+			modifiableX[i][j] = True
+
+	D = np.zeros((l[n] + 1, l[n] + 1), dtype='double')
+	K = np.zeros((l[n] + 1, l[n] + 1), dtype='double')
+
+	d = 1
+	X0 = np.random.normal(0.0, 0.3, (l[1], d))
+	for i0 in range(l[1]):
+		for i1 in range(l[1]):
+			# D[i0][i1] = np.dot(X0[i0] - X0[i1], X0[i0] - X0[i1])
+			D[i0][i1] = 0.0
+
+	K0 = np.ones((l[1], l[1]), dtype='double')
+	# K0 = np.diag(np.random.random((l[1])))
+	# for i in range(l[1]):
+	# 	K0[i][i] = K0[i][i] / (1.0 - K0[i][i])
+	# if l[1] > 1:
+	# 	U = ortho_group.rvs(dim = l[1])
+	# 	K0 = U @ K0 @ U.T
+
+	# K0[0][0] = 1.0 + np.exp(np.random.random() * 5.0) * K0[0][0]
+	for i0 in range(l[1]):
+		for i1 in range(l[1]):
+			K0[i0][i1] = K0[0][0]
+
+	# s = np.random.random()
+	# for i in range(l[1]):
+	# 	K0[i][0] *= s
+	# 	K0[0][i] *= s
+
+	for i0 in range(l[n] + 1):
+		for i1 in range(l[n] + 1):
+			D[i0][i1] = D[i0 % l[1]][i1 % l[1]]
+			K[i0][i1] = K0[i0 % l[1]][i1 % l[1]]
 
 
 
@@ -606,13 +426,14 @@ if False:
 	print(ans)
 	print(X)
 	print(np.reciprocal(sigma2_end))
+	print(w)
 	print()
 	calc(X, sigma2_end, 3)
 	# print(X)
 	# calc(X, sigma2_end, 2)
 
-elif True:
-	gen_seed = get_next_seed(True)
+else:
+	gen_seed = get_next_seed(False)
 	generate_random(gen_seed)
 	# generate_from_file()
 
@@ -640,7 +461,7 @@ elif True:
 
 	# 	seed += 1
 
-	for seed in range(100):
+	for seed in range(1000):
 		(ans, X, sigma2) = minimize(seed)
 		print(seed, '\t', ans)
 		
@@ -651,50 +472,55 @@ elif True:
 			max_seed = seed
 
 	print("\n")
-	new_l, new_p, new_X = aggregate_input(max_X, max_sigma2, 0.0000001, 0.0001, 100.0)
-	print(max_seed)
-	print(max_ans)
-	print()
-	print(new_l)
-	print(new_p)
-	print(new_X)
-
-
+	print("SEED:", gen_seed)
 	print("\n")
 	print(max_seed)
 	print(max_ans)
-	print("\n")
-	print(np.reciprocal(max_sigma2))
 	print(max_X)
+	print(np.reciprocal(max_sigma2))
+	print(w)
 	print()
 	calc(max_X, max_sigma2, 4)
 
 	save_to_file(max_ans, max_X, max_sigma2)
 
-else:
-	for _ in range(1000):
-		gen_seed = get_next_seed(True)
-		generate_random(gen_seed)
 
-		(ans, X, sigma2) = minimize(gen_seed)
-		print(gen_seed, '\t', ans)
 
-		new_l, new_p, new_X = aggregate_input(X, sigma2, 0.0001, 0.001, 10.0)
-		print(new_l)
 
-		END = False
-		for k in range(n):
-			if new_l[k+1] - new_l[k] > 1:
-				END = True
-				break
 
-		if END:
-			print(l)
-			print(np.reciprocal(sigma2))
-			print(X)
-			print()
-			calc(X, sigma2, 4)
+# DEBUG
+	# (X0, R0, P0) = start_random(seed)
+	# grad = minimize_func(get_v([X0, R0, P0]))[1]
+	# counter = 0
 
-			save_to_file(ans, X, sigma2)
-			break
+	# for i in range(l[n]):
+	# 	for j in range(l[n]):
+	# 		if modifiableX[i][j]:
+	# 			X0[i][j] -= 0.001
+	# 			ANS0 = minimize_func(get_v([X0, R0, P0]))[0]
+	# 			X0[i][j] += 0.002
+	# 			ANS1 = minimize_func(get_v([X0, R0, P0]))[0]
+	# 			X0[i][j] -= 0.001
 
+	# 			print(i, j, "derivative:", (ANS1 - ANS0)/0.002, "\t", grad[counter])
+	# 			counter += 1
+
+	# for i in range(n + 1):
+	# 	R0[i] -= 0.001
+	# 	ANS0 = minimize_func(get_v([X0, R0, P0]))[0]
+	# 	R0[i] += 0.002
+	# 	ANS1 = minimize_func(get_v([X0, R0, P0]))[0]
+	# 	R0[i] -= 0.001
+
+	# 	print(i, "derivative:", (ANS1 - ANS0)/0.002, "\t", grad[counter])
+	# 	counter += 1
+
+	# for i in range(n + 1):
+	# 	P0[i] -= 0.001
+	# 	ANS0 = minimize_func(get_v([X0, R0, P0]))[0]
+	# 	P0[i] += 0.002
+	# 	ANS1 = minimize_func(get_v([X0, R0, P0]))[0]
+	# 	P0[i] -= 0.001
+
+	# 	print(i, "derivative:", (ANS1 - ANS0)/0.002, "\t", grad[counter])
+	# 	counter += 1

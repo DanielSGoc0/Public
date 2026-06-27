@@ -83,6 +83,8 @@ def calc(args):
 
 	X[N, M:] *= np.sqrt(R2 / np.dot(X[N, M:], X[N, M:]))
 
+	f = [0.3, 0.4, 0.6, 0.75, 0.1, 0.5]
+
 	Sigma = np.zeros((N + 1, N + 1), dtype='double')
 	for i in range(N + 1):
 		for j in range(N + 1):
@@ -91,7 +93,12 @@ def calc(args):
 			# Sigma[i][j] = np.exp(-np.dot(X[i] - X[j], X[i] - X[j]) * 4.0) + 4.0 * np.exp(-np.dot(X[i] - X[j], X[i] - X[j]) / 4.0)
 			# Sigma[i][j] = np.exp(-np.dot(X[i] - X[j], X[i] - X[j]) * 8.0) + 1.0 * np.exp(-np.dot(X[i] - X[j], X[i] - X[j]) / 8.0) + 1
 		# M[i][i] += err2[i]
-		Sigma[i][i] += err2[i]
+		# Sigma[i][i] += err2[i]
+			if i < N and i != j:
+				Sigma[i][j] *= f[i]
+			if j < N and i != j:
+				Sigma[i][j] *= f[j]
+	print(Sigma + E)
 	C = scipy.linalg.cholesky(Sigma + E, lower=True)
 	# print(C)
 	# print(scipy.linalg.cholesky(M[:N, :N], lower=False))
@@ -171,10 +178,10 @@ def minimize(seed0, seed1):
 
 	R2 = 1.5
 	M = 0
-	L = [1, 3, 5]
+	L = [1, 2, 3, 4, 5]
 	N = L[len(L) - 1]
 	L.append(N + 1)
-	P = [1.0, 1.0]
+	P = [1.0, 1.0, 1.0, 1.0]
 
 	X0 = np.zeros((N + 1, N + 1), dtype='double')
 	modifiable = [[False for j in range(N + 1)] for i in range(N + 1)]
